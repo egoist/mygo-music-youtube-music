@@ -1,0 +1,16 @@
+{
+  "Charts": "排行榜",
+  "New Releases": "最新發行",
+  "Home": "首頁",
+  "Your YouTube Music session has ended: sign in again": "你的 YouTube Music 登入工作階段已結束, 請重新登入",
+  "YouTube Music didn't take that sign-in: try again": "YouTube Music 未接受這次登入, 請再試一次",
+  "YouTube gave no address to report it to": "YouTube 未提供回報播放紀錄的網址",
+  "Allow YouTube Music to start programs in its settings": "請在 YouTube Music 外掛的設定中允許啟動程式",
+  "YouTube gave this visit no ID": "YouTube 未提供訪客 ID",
+  "YouTube listed no audio to play as it is": "YouTube 未提供可直接播放的音訊",
+  "YouTube turned down your session: sign in again": "YouTube 拒絕了這次登入工作階段, 請重新登入",
+  "YouTube asks you to sign in to play this": "YouTube 要求登入後才能播放",
+  "YouTube Music plays through ffmpeg: install it with Homebrew, or so that it's on the PATH": "YouTube Music 需要 ffmpeg 才能播放. 請安裝 ffmpeg 並加入 PATH",
+  "the audio didn't start in time": "音訊播放逾時",
+  "no such page": "找不到這個頁面"
+}
