@@ -10,8 +10,13 @@ const site = "https://music.youtube.com";
 const webUA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-// What the plugin says is in the listener's language, from locales/zh-CN.json.
+// The plugin translates its own labels from locales/<language>.json.
 const t = host.t;
+
+function youtubeLanguage() {
+  const language = host.language();
+  return language === "zh-CN" || language === "zh-TW" ? language : "en";
+}
 
 function fail(code, message) {
   const e = new Error(message);
@@ -83,8 +88,7 @@ function clientVersion() {
 // The apps the service tells apart, as a request says it's from one of them.
 const remix = {
   get client() {
-    // YouTube's own titles, such as its shelves', come in the listener's language.
-    return { clientName: "WEB_REMIX", clientVersion: clientVersion(), hl: host.language() === "zh-CN" ? "zh-CN" : "en" };
+    return { clientName: "WEB_REMIX", clientVersion: clientVersion() };
   },
 };
 
@@ -133,7 +137,7 @@ async function call(endpoint, body, as = remix) {
       ...(as.anonymous ? {} : authHeaders()),
       ...as.headers,
     },
-    body: JSON.stringify({ context: { client: as.client }, ...body }),
+    body: JSON.stringify({ context: { client: { ...as.client, hl: youtubeLanguage() } }, ...body }),
   });
   if (res.status === 401) {
     endSession();
@@ -380,8 +384,10 @@ const browserUA =
     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0";
 
 export async function signIn() {
+  const page = new URL(signInPage);
+  page.searchParams.set("hl", youtubeLanguage());
   const { cookie: session } = await host.webSignIn({
-    url: signInPage,
+    url: page.href,
     cookiesOf: site,
     until: ["SAPISID", "__Secure-3PSID"],
     userAgent: browserUA,

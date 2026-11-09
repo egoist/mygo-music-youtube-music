@@ -24,6 +24,8 @@ In Settings > Plugins, allow YouTube Music to start programs. To get your librar
 
 It needs MyGo Music 0.1.8 or later, and only starts ffmpeg and yt-dlp: from the PATH, `/opt/homebrew/bin` or `/usr/local/bin`. If they're somewhere else, link them into one of those.
 
+The plugin follows the language selected in MyGo Music. Traditional Chinese is available in builds of MyGo Music that offer that language.
+
 ## Signing in
 
 You sign in on Google's page, in a window of the app. The session is kept unencrypted in the plugin's data on this machine, and is sent to music.youtube.com, s.youtube.com for your history, and to yt-dlp when it fetches audio. Signing out forgets it. To end the session on Google's side, remove the device in your Google account's security settings.
