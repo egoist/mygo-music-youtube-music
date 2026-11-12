@@ -808,7 +808,7 @@ async function locate(id) {
     if (e.code === "unavailable") throw e;
     console.warn(`finding ${id}'s audio: ${e.message}`);
     visitor = "";
-    found = await throughYtdlp(id, e);
+    found = await throughYtdlp(id, e, e.live === true);
   }
   found.at = Date.now();
   located.set(id, found);
@@ -835,6 +835,15 @@ async function direct(id) {
   if (status.status !== "OK") {
     const why = status.reason || `YouTube says ${status.status || "nothing"} of this`;
     throw status.status === "UNPLAYABLE" || status.status === "ERROR" ? fail("unavailable", why) : new Error(why);
+  }
+  if (r.videoDetails?.isLive === true || r.videoDetails?.isLiveContent === true) {
+    const hls = r.streamingData?.hlsManifestUrl;
+    if (!hls) {
+      const error = new Error("YouTube returned no HLS playlist for this live video");
+      error.live = true;
+      throw error;
+    }
+    return { url: hls, http_headers: { "User-Agent": visionUA }, gain: gainOf(r.playerConfig?.audioConfig), direct: true, live: true };
   }
   let best = null;
   for (const f of r.streamingData?.adaptiveFormats || []) {
@@ -866,13 +875,13 @@ const ytdlpTimeout = 25000;
 // yt-dlp finds the audio as YouTube's website does, which takes it a few
 // seconds, and a JavaScript runtime to work out YouTube's challenges. Without
 // it, what went wrong without it stands.
-async function throughYtdlp(id, why) {
+async function throughYtdlp(id, why, live = false) {
   const ytdlp = await program("yt-dlp", "--version");
   if (!ytdlp) throw why;
   const args = [
     "--config-locations", "-",
     "--no-warnings", "--no-playlist", "--no-progress",
-    ...whatYtdlpAsks(),
+    ...whatYtdlpAsks(live),
     "--print", "%(.{url,http_headers})j",
   ];
   for (const runtime of ["deno", "node", "bun"]) {
@@ -893,7 +902,7 @@ async function throughYtdlp(id, why) {
   const code = await proc.wait();
   clearTimeout(timer);
   if (code !== 0 || !lines.length) throw ytdlpFailure(proc.errorOutput());
-  return { ...JSON.parse(lines[lines.length - 1]), direct: false };
+  return { ...JSON.parse(lines[lines.length - 1]), direct: false, live };
 }
 
 // Which of YouTube's apps yt-dlp asks as, and for what. Signed out, its own
@@ -901,7 +910,11 @@ async function throughYtdlp(id, why) {
 // embedded player, whose addresses YouTube now turns down with no token from
 // its JavaScript, which yt-dlp can't make. Safari's are good, but only as HLS,
 // with video: at 360p, its audio is the AAC YouTube has on its own.
-function whatYtdlpAsks() {
+function whatYtdlpAsks(live = false) {
+  if (live) {
+    const format = ["--format", "bestaudio[protocol^=m3u8]/best[protocol^=m3u8][height<=360]/worst[protocol^=m3u8]"];
+    return cookie() ? ["--extractor-args", "youtube:player_client=web_safari", ...format] : format;
+  }
   if (!cookie()) {
     return ["--extractor-args", "youtube:skip=hls,dash", "--format", "bestaudio[protocol^=http]/bestaudio"];
   }
@@ -940,10 +953,36 @@ async function asksInPieces(ffmpeg) {
 // time, for what was skipped before it was ever asked for.
 const serving = [];
 const servingAtMost = 3;
-const servedWithin = 10 * 60 * 1000;
+const noOutputWithin = 90 * 1000;
 
 function stopWaiting() {
-  while (serving.length >= servingAtMost) serving.shift().kill();
+  if (serving.length >= servingAtMost) {
+    const error = new Error("Too many active audio streams");
+    error.code = "busy";
+    throw error;
+  }
+}
+
+function trackServing(proc) {
+  const entry = { proc, hasOutput: false };
+  serving.push(entry);
+  const timer = setTimeout(() => {
+    if (!entry.hasOutput) proc.kill();
+  }, noOutputWithin);
+  (async () => {
+    try {
+      for (let line; (line = await proc.readLine()) !== null; ) {
+        if (line === "progress=continue" || line === "progress=end") entry.hasOutput = true;
+      }
+    } catch (_) {}
+  })();
+  proc.wait().then(() => {
+    entry.stopped?.();
+    clearTimeout(timer);
+    const at = serving.indexOf(entry);
+    if (at >= 0) serving.splice(at, 1);
+  });
+  return entry;
 }
 
 async function serve(source, bitRate) {
@@ -957,24 +996,19 @@ async function serve(source, bitRate) {
   const port = 20000 + Math.floor(Math.random() * 40000);
   const proc = host.spawn(ffmpeg, [
     "-nostdin", "-hide_banner", "-nostats",
+    "-progress", "pipe:1", "-stats_period", "1",
     "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
     "-rw_timeout", "15000000",
     ...(pieces ? ["-request_size", String(10 << 20)] : []),
     ...(headers["User-Agent"] ? ["-user_agent", headers["User-Agent"]] : []),
     "-i", source.url,
     "-vn", "-c:a", "libmp3lame", "-b:a", `${bitRate}k`, "-id3v2_version", "0", "-write_xing", "0",
-    "-f", "mp3", "-listen", "1", `http://127.0.0.1:${port}/`,
+    "-f", "mp3", "-rw_timeout", "30000000", "-listen", "1", `http://127.0.0.1:${port}/`,
   ]);
   proc.closeStdin();
+  const entry = trackServing(proc);
   let stopped = false;
-  serving.push(proc);
-  const timer = setTimeout(() => proc.kill(), servedWithin);
-  proc.wait().then(() => {
-    stopped = true;
-    clearTimeout(timer);
-    const at = serving.indexOf(proc);
-    if (at >= 0) serving.splice(at, 1);
-  });
+  entry.stopped = () => { stopped = true; };
   // It says what it's reading right before it opens the port. Trying the port
   // isn't a way to find out: it would take the one request ffmpeg answers.
   const until = Date.now() + 15000;
@@ -1000,9 +1034,9 @@ export async function stream({ id, quality }) {
     // An address may stop working before it said it would, and YouTube now and
     // then turns down one it just gave out: yt-dlp may find one that works.
     located.delete(id);
-    if (!source.direct || e.code === "setup") throw e;
+    if (!source.direct || e.code === "setup" || e.code === "busy") throw e;
     console.warn(`playing ${id} as YouTube gave it: ${e.message}`);
-    source = { ...(await throughYtdlp(id, e)), gain: source.gain, at: Date.now() };
+    source = { ...(await throughYtdlp(id, e, source.live === true)), gain: source.gain, at: Date.now() };
     url = await serve(source, kbps);
     located.set(id, source);
   }
