@@ -870,13 +870,17 @@ async function throughYtdlp(id, why) {
   const ytdlp = await program("yt-dlp", "--version");
   if (!ytdlp) throw why;
   const args = [
+    "--ignore-config",
     "--config-locations", "-",
     "--no-warnings", "--no-playlist", "--no-progress",
     ...whatYtdlpAsks(),
     "--print", "%(.{url,http_headers})j",
   ];
   for (const runtime of ["deno", "node", "bun"]) {
-    const path = await program(runtime, "--version");
+    let path = null;
+    try {
+      path = await program(runtime, "--version");
+    } catch {}
     if (path) {
       args.push("--js-runtimes", `${runtime}:${path}`);
       break;
@@ -914,7 +918,7 @@ function whatYtdlpAsks() {
 function ytdlpFailure(output) {
   const said = output.split("\n").reverse().find((l) => l.startsWith("ERROR:")) || output.trim() || "yt-dlp stopped";
   const why = said.replace(/^ERROR:\s*(\[[^\]]*\]\s*)?(\S+:\s*)?/, "");
-  if (/not a bot|sign in|cookies/i.test(why)) {
+  if (/not a bot|sign in to confirm|please sign in|login_required|login required|cookies are (?:no longer|not) valid|authentication required/i.test(why)) {
     return fail("signIn", cookie() ? t("YouTube turned down your session: sign in again") : t("YouTube asks you to sign in to play this"));
   }
   if (/unavailable|private|removed|not available|premium/i.test(why)) return fail("unavailable", why);
